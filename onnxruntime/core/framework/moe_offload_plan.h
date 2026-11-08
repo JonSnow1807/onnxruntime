@@ -313,10 +313,11 @@ struct MoeOffloadSessionPolicy {
                                  "Invalid ", kOrtSessionOptionsMoeOffloadPlacement, " value '", val,
                                  "'; expected 'static' or 'adaptive' (prototype 'basic'/'layered' are not supported).");
         }
-      } else if (key == kOrtSessionOptionsMoeOffloadDeviceExpertBytes) {
+      } else if (key == kOrtSessionOptionsMoeOffloadDeviceExpertBytes ||
+                 key == "session.moe.offload.gpu_budget_bytes") {
         if (!TryParseBudgetSpec(val, out.device_expert_bytes)) {
           return ORT_MAKE_STATUS(ONNXRUNTIME, INVALID_ARGUMENT,
-                                 "Invalid ", kOrtSessionOptionsMoeOffloadDeviceExpertBytes, " value '", val,
+                                 "Invalid ", key, " value '", val,
                                  "'; expected 'auto' or non-negative integer bytes.");
         }
       } else if (key == kOrtSessionOptionsMoeOffloadHostExpertBytes) {
@@ -426,6 +427,24 @@ struct MoeOffloadSessionPolicy {
                              " value '", skip, "'; expected '0' or '1'.");
     }
     out.skip_zero_cold_doorbell = (skip == "1");
+    std::string gpu_exp_raw;
+    if (auto it = kv_map.find("ep.cuda.moe_packed_gpu_experts"); it != kv_map.end()) {
+      gpu_exp_raw = it->second;
+    } else if (const char* env = std::getenv("ORT_MOE_PACKED_GPU_EXPERTS"); env != nullptr && env[0] != '\0') {
+      gpu_exp_raw = env;
+    }
+    if (!gpu_exp_raw.empty()) {
+      int32_t gpu_exp_val = -1;
+      if (TryParseInt32(TrimAscii(gpu_exp_raw), gpu_exp_val) && gpu_exp_val >= 0) {
+        if (out.mode == OffloadMode::kDisabled) {
+          out.mode = OffloadMode::kAuto;
+        }
+        NodeOverrideSpec wildcard{};
+        wildcard.node_name = "*";
+        wildcard.max_resident_slots = gpu_exp_val;
+        out.node_overrides.push_back(std::move(wildcard));
+      }
+    }
 
     const auto min_w_it = kv_map.find(kOrtSessionOptionsMoeOffloadMinExpertWeight);
     const char* env_min_w = std::getenv("ORT_QMOE_MIN_EXPERT_WEIGHT");
